@@ -17,7 +17,17 @@ and does not build the source. The `filename` in `hacs.json` must match it.
 
 Link your own account, approve the request in signed-in CLM, then finish linking.
 Each browser/card starts locked. The workspace uses actual shared CLM components;
-the card holds no catalog and renders no private names or options itself.
+the card holds no session catalog and renders no private session names or options itself.
+
+Expand **HA automation actions and setup** above the embedded workspace to see
+which native launch actions are registered in this HA instance, their inputs,
+worker setup and the complete guide to the graphical automation builder. Use
+**Check Windows workers** in the card to see the shared device names and
+online/offline status. Configure launch actions using the native HA form:
+connection, device, PIN, preset/session name and incognito. No YAML editing is
+required. Install the worker
+separately; updating HACS does not install Windows files. The launch actions
+accept a PIN per call while the card remains outside Personal Mode.
 
 Use HTTPS online; explicit HTTP URLs are supported on trusted local networks.
 The integration's server URL can use the shared Docker network, while its web

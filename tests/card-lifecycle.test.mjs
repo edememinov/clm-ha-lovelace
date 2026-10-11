@@ -89,6 +89,41 @@ test('configuration editor uses HA form and emits neutral configuration',()=>{
   assert.match(form.computeHelper({name:'workspace_mode'}),/reachable by your browser/);
 });
 
+test('action guide reflects HA registration updates without resetting the workspace',async()=>{
+  const card=setup(async()=>status);await flush();
+  const frame=card._frame;
+  const text=()=>card._guideBody.children.flatMap(node=>[node.textContent,...node.children.map(row=>row.textContent)]).join('\n');
+  assert.match(text(),/Not registered/);
+  card.hass={...card._hass,services:{clm:{start_session:{},open_selkies:{},open_clm:{},list_devices:{}}}};
+  assert.equal(card._frame,frame);
+  assert.doesNotMatch(text(),/Not registered/);
+  assert.match(text(),/Your account is linked/);
+  assert.match(text(),/HACS does not install files on the PC/);
+  assert.match(text(),/registration above does not confirm worker connectivity/);
+  assert.match(text(),/No YAML editing is required/);
+  const links=card._guideBody.children.filter(node=>node.tagName==='a');
+  assert.equal(links[0].rel,'noopener noreferrer');
+  const setupLink=card._guideBody.children.at(-1).children[0];
+  assert.equal(setupLink.href,'https://workspace.example/tools/plugins/window-visibility/settings');
+  card.disconnectedCallback();
+});
+
+test('worker check uses the current account and returns status without PINs or workspace resets',async()=>{
+  const calls=[];
+  const card=setup(async message=>{calls.push(message);return message.operation==='status'?status:{response:{devices:[{name:'Desk PC',online:true,version:'1.3.1'},{name:'Spare PC',online:false,version:'1.2.0'}]}}});
+  await flush();card.hass={...card._hass,services:{clm:{list_devices:{}}}};
+  const frame=card._frame,controls=card._guideBody.children.find(node=>node.children[0]?.tagName==='ha-button');
+  controls.children[0].dispatchEvent(new Event('click'));await flush();
+  assert.match(controls.children[1].textContent,/Desk PC: online/);
+  assert.match(controls.children[1].textContent,/Spare PC: offline/);
+  assert.deepEqual(calls.at(-1),{type:'call_service',domain:'clm',service:'list_devices',service_data:{config_entry_id:'connection'},return_response:true});
+  assert.equal(card._frame,frame);assert.equal(controls.children[0].disabled,false);
+  card._hass.callWS=async()=>{throw new Error('Offline');};
+  controls.children[0].dispatchEvent(new Event('click'));await flush();
+  assert.match(controls.children[1].textContent,/Could not check workers/);assert.equal(card._frame,frame);
+  card.disconnectedCallback();
+});
+
 test('local override uses the configured local frame and the current browser audience',async()=>{
   const calls=[];
   const previous=window.location;
