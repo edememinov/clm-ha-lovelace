@@ -29,6 +29,13 @@ test('workspace origin cannot carry credentials, paths or weaker transport', () 
   assert.equal(origin('https://workspace.example/'), 'https://workspace.example');
   for (const value of ['http://workspace.example', 'https://user:secret@workspace.example', 'https://workspace.example/path', 'https://workspace.example/?token=secret']) assert.throws(() => origin(value));
 });
+
+test('configured local HTTP workspace is accepted explicitly, with web-only origins', () => {
+  assert.equal(origin('http://192.168.1.20:4200/', true), 'http://192.168.1.20:4200');
+  for (const value of ['ftp://server', 'http://user:secret@server', 'http://server/path']) assert.throws(() => origin(value, true));
+  assert.equal(configuration({type:'custom:clm-card',config_entry_id:'entry',workspace_mode:'local'}).workspace_mode, 'local');
+  assert.throws(() => configuration({type:'custom:clm-card',config_entry_id:'entry',workspace_mode:'arbitrary'}));
+});
 test('ready messages require exact source, origin, view and bounded nonce', () => {
   const frame = {contentWindow:{}};
   const event = {origin:'https://workspace.example', source:frame.contentWindow, data:{type:'clm-companion-ready', view:'workspace', nonce:'a'.repeat(64)}};

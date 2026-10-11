@@ -16,6 +16,15 @@ Local CSS only defines necessary frame width/height/border geometry. Host
 surfaces and controls retain HA ownership; the embedded CLM surface retains
 shared CLM ownership. There are no private theme tokens or copied controls.
 
+The card supplies `window.location.origin` and its presentation-only
+`workspace_mode` on private WebSocket requests. HA selects one of the integration's
+stored local/default web URLs and validates the exact approved HA origin. The
+browser never supplies an arbitrary workspace URL. Pairing and embedding share
+that selection. Native `ha-form` owns the Automatic/Local/Online selector and
+field help. Explicit HTTP web origins are allowed for local use, while HTTPS
+dashboards cannot load an HTTP frame. Existing dashboard configurations default
+to Automatic without adding new keys to their saved JSON.
+
 Unit tests cover origin/source spoofing, lifecycle races, neutral configuration,
 grant delivery and native editor events. Live browser verification is not claimed.
 

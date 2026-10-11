@@ -19,13 +19,21 @@ Link your own account, approve the request in signed-in CLM, then finish linking
 Each browser/card starts locked. The workspace uses actual shared CLM components;
 the card holds no catalog and renders no private names or options itself.
 
-Use HTTPS for all three origins. The CLM frontend host must permit framing the
-`/companions/workspace` route by the approved HA origin with CSP `frame-ancestors`.
+Use HTTPS online; explicit HTTP URLs are supported on trusted local networks.
+The integration's server URL can use the shared Docker network, while its web
+app URLs must be reachable by your browser. The card sends the current HA
+browser origin for exact approval checks. Automatic mode selects the local CLM
+web URL at HA's internal address and the online/default URL otherwise. Choose
+**CLM web address** in the native card editor to override this if needed.
+HTTPS dashboards cannot embed HTTP workspaces; auto mode uses an HTTPS default
+when available. The CLM frontend host must permit framing the
+`/companions/workspace` route by each approved HA origin with CSP `frame-ancestors`.
 Keep the ordinary application's existing framing policy. Configure the existing
 CLM API origin normally; cross-origin API access must allow the workspace origin.
 There is no dependency on third-party cookies for embedded requests.
 
 Dashboard configuration contains only `type`, `config_entry_id` and bounded
-`height`. Credentials travel through authenticated HA WebSocket responses and
+`height`, plus an optional presentation-only `workspace_mode` (local or online).
+Credentials travel through authenticated HA WebSocket responses and
 origin-checked postMessage, never URL parameters or browser persistent storage.
 See [ARCHITECTURE.md](ARCHITECTURE.md) for ownership and verification scope.

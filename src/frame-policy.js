@@ -1,6 +1,6 @@
-export function origin(value) {
+export function origin(value, allowHttp = false) {
   const url = new URL(value);
-  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
+  if ((!['https:', ...(allowHttp ? ['http:'] : [])].includes(url.protocol)) || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
     throw new Error('Invalid workspace origin.');
   }
   return url.origin;
@@ -11,9 +11,11 @@ export function configuration(value) {
     throw new Error('Choose a CLM connection.');
   }
   const height = value.height ?? 640;
+  const mode = value.workspace_mode ?? 'auto';
+  if (!['auto', 'local', 'online'].includes(mode)) throw new Error('Choose automatic, local or online CLM access.');
   if (!Number.isInteger(height) || height < 320 || height > 1600) throw new Error('Choose a height from 320 to 1600.');
   // Only presentation and a neutral installation reference can enter dashboard JSON.
-  return { type: 'custom:clm-card', config_entry_id: value.config_entry_id, height };
+  return { type: 'custom:clm-card', config_entry_id: value.config_entry_id, height, ...(mode === 'auto' ? {} : { workspace_mode: mode }) };
 }
 
 export function readyMessage(event, frame, workspaceOrigin) {

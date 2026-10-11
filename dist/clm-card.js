@@ -1,6 +1,6 @@
-export function origin(value) {
+export function origin(value, allowHttp = false) {
   const url = new URL(value);
-  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
+  if ((!['https:', ...(allowHttp ? ['http:'] : [])].includes(url.protocol)) || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
     throw new Error('Invalid workspace origin.');
   }
   return url.origin;
@@ -11,9 +11,11 @@ export function configuration(value) {
     throw new Error('Choose a CLM connection.');
   }
   const height = value.height ?? 640;
+  const mode = value.workspace_mode ?? 'auto';
+  if (!['auto', 'local', 'online'].includes(mode)) throw new Error('Choose automatic, local or online CLM access.');
   if (!Number.isInteger(height) || height < 320 || height > 1600) throw new Error('Choose a height from 320 to 1600.');
   // Only presentation and a neutral installation reference can enter dashboard JSON.
-  return { type: 'custom:clm-card', config_entry_id: value.config_entry_id, height };
+  return { type: 'custom:clm-card', config_entry_id: value.config_entry_id, height, ...(mode === 'auto' ? {} : { workspace_mode: mode }) };
 }
 
 export function readyMessage(event, frame, workspaceOrigin) {
@@ -84,7 +86,8 @@ export class ClmCard extends HTMLElement {
     this.shadowRoot.replaceChildren();
   }
   _ws(operation, extra = {}) {
-    return this._hass.callWS({ type: 'clm/request', config_entry_id: this._config.config_entry_id, operation, ...extra });
+    return this._hass.callWS({ type: 'clm/request', config_entry_id: this._config.config_entry_id,
+      audience: window.location.origin, workspace_mode: this._config.workspace_mode ?? 'auto', operation, ...extra });
   }
   _surface(text) {
     const card = document.createElement('ha-card');
@@ -117,7 +120,8 @@ export class ClmCard extends HTMLElement {
       const status = await this._ws('status');
       if (generation !== this._generation || !this.isConnected) return;
       if (status.version !== 1) throw new Error('Unsupported version.');
-      this._origin = origin(status.workspace_origin);
+      this._origin = origin(status.workspace_origin, true);
+      if (window.location.protocol === 'https:' && this._origin.startsWith('http:')) throw new Error('Mixed content.');
       if (!status.linked) {
         const content = this._surface('Link your own CLM account.');
         this._button(content, 'Link account', async () => {
@@ -158,8 +162,10 @@ export class ClmCard extends HTMLElement {
       const surface = document.createElement('ha-card');
       surface.append(frame);
       this.shadowRoot.replaceChildren(surface);
-    } catch {
-      if (generation === this._generation) this._surface('CLM connection is unavailable.');
+    } catch (error) {
+      if (generation === this._generation) this._surface(error?.code === 'invalid_browser_address'
+        ? 'This Home Assistant address is not approved or the CLM web address cannot be embedded. Reconfigure the CLM integration or choose another web address in the card editor.'
+        : 'CLM connection is unavailable.');
     }
   }
   async _receive(event) {
@@ -211,7 +217,7 @@ export class ClmCard extends HTMLElement {
 
 export class ClmCardEditor extends HTMLElement {
   constructor() { super(); this.attachShadow({ mode: 'open' }); }
-  setConfig(value) { this._config = { type: 'custom:clm-card', config_entry_id: value.config_entry_id ?? '', height: value.height ?? 640 }; this._render(); }
+  setConfig(value) { this._config = { type: 'custom:clm-card', config_entry_id: value.config_entry_id ?? '', height: value.height ?? 640, workspace_mode: value.workspace_mode ?? 'auto' }; this._render(); }
   set hass(value) { this._hass = value; this._render(); }
   _render() {
     if (!this._hass || !this._config) return;
@@ -221,8 +227,16 @@ export class ClmCardEditor extends HTMLElement {
     form.schema = [
       { name: 'config_entry_id', required: true, selector: { config_entry: { integration: 'clm' } } },
       { name: 'height', selector: { number: { min: 320, max: 1600, step: 40, mode: 'box' } } },
+      { name: 'workspace_mode', selector: { select: { mode: 'dropdown', options: [
+        { value: 'auto', label: 'Automatic' }, { value: 'local', label: 'Local' }, { value: 'online', label: 'Online / default' },
+      ] } } },
     ];
-    form.computeLabel = field => field.name === 'height' ? 'Workspace height' : 'CLM connection';
+    form.computeLabel = field => ({ height: 'Workspace height', config_entry_id: 'CLM connection', workspace_mode: 'CLM web address' })[field.name];
+    form.computeHelper = field => ({
+      config_entry_id: 'The integration connection used to link your own CLM account and send actions.',
+      height: 'The height of the embedded CLM workspace, in pixels.',
+      workspace_mode: 'Automatic uses the local CLM URL for HA’s internal address and the online/default URL otherwise. Override this if you access HA and CLM differently. Both URLs are configured in the integration and must be reachable by your browser.',
+    })[field.name];
     form.addEventListener('value-changed', event => {
       event.stopPropagation();
       const config = configuration({ type: 'custom:clm-card', ...event.detail.value });

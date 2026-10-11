@@ -74,6 +74,9 @@ test('valid grants use an exact target origin and never the iframe URL',async()=
   assert.equal(frame.contentWindow.sent[0].origin,'https://workspace.example');
   assert.equal(frame.contentWindow.sent[0].value.grant,'secret');
   assert.equal(calls[1].user_id,undefined);
+  assert.equal(calls[0].audience,'https://hub.example');
+  assert.equal(calls[1].audience,'https://hub.example');
+  assert.equal(calls[0].workspace_mode,'auto');
   card.disconnectedCallback();
 });
 test('configuration editor uses HA form and emits neutral configuration',()=>{
@@ -83,4 +86,18 @@ test('configuration editor uses HA form and emits neutral configuration',()=>{
   let result;editor.addEventListener('config-changed',event=>result=event.detail.config);
   form.dispatchEvent(new CustomEvent('value-changed',{detail:{value:{config_entry_id:'connection',height:400,credential:'secret'}}}));
   assert.deepEqual(result,{type:'custom:clm-card',config_entry_id:'connection',height:400});
+  assert.match(form.computeHelper({name:'workspace_mode'}),/reachable by your browser/);
+});
+
+test('local override uses the configured local frame and the current browser audience',async()=>{
+  const calls=[];
+  const previous=window.location;
+  window.location={origin:'http://192.168.1.10:8123',protocol:'http:'};
+  const card=setup(async message=>{calls.push(message);return {...status,workspace_origin:'http://192.168.1.20:4200'};});
+  card.setConfig({...config,workspace_mode:'local'});
+  await flush();
+  assert.equal(card._frame.src,'http://192.168.1.20:4200/companions/workspace');
+  assert.equal(calls.at(-1).workspace_mode,'local');
+  assert.equal(calls.at(-1).audience,'http://192.168.1.10:8123');
+  card.disconnectedCallback();window.location=previous;
 });
