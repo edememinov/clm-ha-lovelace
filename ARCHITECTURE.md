@@ -50,6 +50,13 @@ network address-space checks were disabled for the intercepted fixture; real
 device permission prompts and certificates are not verified by this test. The
 scripts stay outside repositories in `E:/CLM/.tmp/ha-card-dns-browser.mjs`.
 
+`.github/workflows/validate.yml` validates every push/PR and publishes stable
+main versions after the tests/build/artifact check. `package.json` owns the
+version; published source/module versions are immutable and code changes
+without a bump fail. A contents-write release job creates a draft, attaches the
+committed validated JavaScript module and then publishes. No shared extension
+packaging is performed. Reruns skip an identical published release.
+
 An authenticated frame may hand off an opaque approved binding to an existing
 native automation. Only an HA administrator can use the native configuration
 endpoint. The shell reads the current definition twice and compares revisions

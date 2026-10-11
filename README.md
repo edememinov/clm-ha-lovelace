@@ -40,6 +40,13 @@ before an exact-origin/exact-frame ready message. Account approval and embedding
 use the same selected URL, validated by the integration's stored allowlist.
 Update the integration and card together to 0.1.2 for IP fallback support.
 
+Pushes to `main` automatically test/build the card, check that the committed
+module matches the build and publish the version in `package.json` as a GitHub
+release with `clm-card.js` attached. Card changes require a version bump;
+published versions cannot be replaced. Documentation-only pushes and reruns do
+not duplicate releases. A failed draft can be resumed for the same commit.
+The workflow can also be started manually from GitHub Actions.
+
 Dashboard configuration contains only `type`, `config_entry_id` and bounded
 `height`, plus an optional presentation-only `workspace_mode` (local or online).
 Credentials travel through authenticated HA WebSocket responses and
