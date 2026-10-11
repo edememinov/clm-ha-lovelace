@@ -22,8 +22,9 @@ the card holds no catalog and renders no private names or options itself.
 Use HTTPS online; explicit HTTP URLs are supported on trusted local networks.
 The integration's server URL can use the shared Docker network, while its web
 app URLs must be reachable by your browser. The card sends the current HA
-browser origin for exact approval checks. Automatic mode selects the local CLM
-web URL at HA's internal address and the online/default URL otherwise. Choose
+browser origin for exact approval checks. Automatic mode tries the local hostname,
+its optional IP fallback and the default web URL from each browser, even when
+HA uses its public hostname on the LAN. Choose
 **CLM web address** in the native card editor to override this if needed.
 HTTPS dashboards cannot embed HTTP workspaces; auto mode uses an HTTPS default
 when available. The CLM frontend host must permit framing the
@@ -31,6 +32,13 @@ when available. The CLM frontend host must permit framing the
 Keep the ordinary application's existing framing policy. Configure the existing
 CLM API origin normally; cross-origin API access must allow the workspace origin.
 There is no dependency on third-party cookies for embedded requests.
+
+The browser probes configured alternatives with credential-free HEAD requests.
+DNS/connectivity failures try the next configured URL; if browser policy blocks
+probes, the iframe handshake can still try alternatives. No credential is sent
+before an exact-origin/exact-frame ready message. Account approval and embedding
+use the same selected URL, validated by the integration's stored allowlist.
+Update the integration and card together to 0.1.2 for IP fallback support.
 
 Dashboard configuration contains only `type`, `config_entry_id` and bounded
 `height`, plus an optional presentation-only `workspace_mode` (local or online).

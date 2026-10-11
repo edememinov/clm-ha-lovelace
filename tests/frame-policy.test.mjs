@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { configuration, origin, readyMessage, appendBinding, bindingMessage } from '../src/frame-policy.js';
+import { configuration, origin, readyMessage, appendBinding, bindingMessage, workspaceCandidates, reachableWorkspace } from '../src/frame-policy.js';
 
 test('configuration retains presentation and connection reference only', () => {
   assert.deepEqual(configuration({type:'custom:clm-card', config_entry_id:'connection', pin:'1234', credential:'secret', height:400}),
@@ -43,4 +43,24 @@ test('ready messages require exact source, origin, view and bounded nonce', () =
   assert.equal(readyMessage({...event,source:{}}, frame, event.origin), false);
   assert.equal(readyMessage({...event,origin:'https://other.example'}, frame, event.origin), false);
   assert.equal(readyMessage({...event,data:{...event.data,nonce:'x'.repeat(1000)}}, frame, event.origin), false);
+});
+
+test('DNS failure uses the configured IP address without sending browser credentials', async()=>{
+  const calls=[];
+  const candidates=['https://clm.local','https://192.168.1.20:8443','https://clm.example'];
+  const chosen=await reachableWorkspace(candidates,async(url,options)=>{
+    calls.push({url,options});
+    if(url.startsWith(candidates[0]))throw new Error('DNS failure');
+    return {};
+  });
+  assert.equal(chosen,candidates[1]);
+  assert.equal(calls.length,2);
+  for(const {options} of calls){assert.equal(options.credentials,'omit');assert.equal(options.method,'HEAD');assert.equal(options.headers,undefined);assert.equal(options.redirect,'error');}
+});
+
+test('failed probes do not prevent frame checks, and HTTPS filters HTTP fallback', async()=>{
+  const status={workspace_origin:'https://clm.example',workspace_origins:['https://clm.local','http://192.168.1.20:4200','https://clm.example']};
+  assert.deepEqual(workspaceCandidates(status,'https://ha.example'),['https://clm.local','https://clm.example']);
+  assert.equal(await reachableWorkspace(['https://clm.local','https://clm.example'],async()=>{throw new Error('CSP blocked');}),'https://clm.local');
+  assert.throws(()=>workspaceCandidates({workspace_origin:'http://clm.local'},'https://ha.example'));
 });

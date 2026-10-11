@@ -6,6 +6,36 @@ export function origin(value, allowHttp = false) {
   return url.origin;
 }
 
+export function workspaceCandidates(status, browserOrigin) {
+  const candidates = status.workspace_origins ?? [status.workspace_origin];
+  if (!Array.isArray(candidates) || candidates.length < 1 || candidates.length > 3) throw new Error('Invalid workspace addresses.');
+  const secure = new URL(browserOrigin).protocol === 'https:';
+  const allowed = [...new Set(candidates.map(value => origin(value, true)))].filter(value => !secure || value.startsWith('https:'));
+  if (!allowed.length) throw new Error('HTTPS dashboards require an HTTPS CLM web address.');
+  return allowed;
+}
+
+export async function reachableWorkspace(candidates, probe, timeoutMs = 2500) {
+  if (!probe || candidates.length === 1) return candidates[0];
+  for (const candidate of candidates) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      // This is browser-side reachability only. No cookies, credentials or grants
+      // are sent; exact frame and server allowlist checks still own authorization.
+      await probe(`${candidate}/companions/workspace`, {
+        method: 'HEAD', mode: 'no-cors', credentials: 'omit', redirect: 'error',
+        cache: 'no-store', signal: controller.signal,
+      });
+      return candidate;
+    } catch { /* Try the next explicitly configured address. */ }
+    finally { clearTimeout(timeout); }
+  }
+  // A connect-src policy may prohibit probes while permitting frames. Let the
+  // actual frame handshake decide rather than blocking on a failed probe.
+  return candidates[0];
+}
+
 export function configuration(value) {
   if (value.type !== 'custom:clm-card' || typeof value.config_entry_id !== 'string' || !value.config_entry_id || value.config_entry_id.length > 128) {
     throw new Error('Choose a CLM connection.');
@@ -79,6 +109,7 @@ export class ClmCard extends HTMLElement {
   }
   _reset() {
     this._generation++;
+    clearTimeout(this._readyTimeout);
     this._frame?.remove();
     this._frame = null;
     this._nonce = null;
@@ -87,9 +118,15 @@ export class ClmCard extends HTMLElement {
   }
   _ws(operation, extra = {}) {
     return this._hass.callWS({ type: 'clm/request', config_entry_id: this._config.config_entry_id,
-      audience: window.location.origin, workspace_mode: this._config.workspace_mode ?? 'auto', operation, ...extra });
+      audience: window.location.origin, workspace_mode: this._config.workspace_mode ?? 'auto',
+      ...(operation !== 'status' && this._canSelectWorkspace && this._origin ? {workspace_origin:this._origin} : {}), operation, ...extra });
   }
   _surface(text) {
+    clearTimeout(this._readyTimeout);
+    this._frame?.remove();
+    this._frame = null;
+    this._nonce = null;
+    this._requesting = false;
     const card = document.createElement('ha-card');
     card.header = 'CLM';
     const content = document.createElement('div');
@@ -120,8 +157,11 @@ export class ClmCard extends HTMLElement {
       const status = await this._ws('status');
       if (generation !== this._generation || !this.isConnected) return;
       if (status.version !== 1) throw new Error('Unsupported version.');
-      this._origin = origin(status.workspace_origin, true);
-      if (window.location.protocol === 'https:' && this._origin.startsWith('http:')) throw new Error('Mixed content.');
+      this._candidates = workspaceCandidates(status, window.location.origin);
+      this._canSelectWorkspace = Array.isArray(status.workspace_origins);
+      const selected = await reachableWorkspace(this._candidates, window.fetch?.bind(window));
+      if (generation !== this._generation || !this.isConnected) return;
+      this._origin = selected;
       if (!status.linked) {
         const content = this._surface('Link your own CLM account.');
         this._button(content, 'Link account', async () => {
@@ -150,23 +190,41 @@ export class ClmCard extends HTMLElement {
         });
         return;
       }
-      const frame = document.createElement('iframe');
-      frame.title = 'CLM workspace';
-      frame.src = `${this._origin}/companions/workspace`;
-      frame.referrerPolicy = 'origin';
-      frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox');
-      frame.style.width = '100%';
-      frame.style.height = `${this._config.height}px`;
-      frame.style.border = '0';
-      this._frame = frame;
-      const surface = document.createElement('ha-card');
-      surface.append(frame);
-      this.shadowRoot.replaceChildren(surface);
+      this._mountFrame(generation);
     } catch (error) {
       if (generation === this._generation) this._surface(error?.code === 'invalid_browser_address'
         ? 'This Home Assistant address is not approved or the CLM web address cannot be embedded. Reconfigure the CLM integration or choose another web address in the card editor.'
         : 'CLM connection is unavailable.');
     }
+  }
+  _mountFrame(generation) {
+    clearTimeout(this._readyTimeout);
+    this._frame?.remove();
+    this._nonce = null;
+    this._requesting = false;
+    const frame = document.createElement('iframe');
+    frame.title = 'CLM workspace';
+    frame.src = `${this._origin}/companions/workspace`;
+    frame.referrerPolicy = 'origin';
+    frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox');
+    frame.style.width = '100%';
+    frame.style.height = `${this._config.height}px`;
+    frame.style.border = '0';
+    this._frame = frame;
+    const surface = document.createElement('ha-card');
+    surface.append(frame);
+    this.shadowRoot.replaceChildren(surface);
+    const remaining = this._candidates.filter(value => value !== this._origin);
+    this._readyTimeout = setTimeout(() => {
+      if (generation !== this._generation || frame !== this._frame || !this.isConnected) return;
+      if (remaining.length && this._canSelectWorkspace) {
+        this._candidates = remaining;
+        this._origin = remaining[0];
+        this._mountFrame(generation);
+      } else {
+        this._surface('The CLM web app did not respond. Check its browser URLs in the integration, or choose another address in the card editor.');
+      }
+    }, 10000);
   }
   async _receive(event) {
     const frame = this._frame;
@@ -175,6 +233,7 @@ export class ClmCard extends HTMLElement {
       return;
     }
     if (!frame || !readyMessage(event, frame, this._origin) || this._requesting || this._nonce === event.data.nonce) return;
+    clearTimeout(this._readyTimeout);
     const generation = this._generation;
     const nonce = event.data.nonce;
     this._requesting = true;
@@ -187,7 +246,7 @@ export class ClmCard extends HTMLElement {
     } catch {
       if (generation === this._generation) this._surface('CLM account authorization is unavailable.');
     } finally {
-      if (generation === this._generation) this._requesting = false;
+      if (generation === this._generation && frame === this._frame) this._requesting = false;
     }
   }
   async _attachBinding(event, frame) {
@@ -235,7 +294,7 @@ export class ClmCardEditor extends HTMLElement {
     form.computeHelper = field => ({
       config_entry_id: 'The integration connection used to link your own CLM account and send actions.',
       height: 'The height of the embedded CLM workspace, in pixels.',
-      workspace_mode: 'Automatic uses the local CLM URL for HA’s internal address and the online/default URL otherwise. Override this if you access HA and CLM differently. Both URLs are configured in the integration and must be reachable by your browser.',
+      workspace_mode: 'Automatic tries the local hostname, its IP fallback, then the default URL from this browser. Local tries only the local addresses. Online uses the default URL. Addresses must be reachable by your browser; HTTPS dashboards require HTTPS web addresses.',
     })[field.name];
     form.addEventListener('value-changed', event => {
       event.stopPropagation();

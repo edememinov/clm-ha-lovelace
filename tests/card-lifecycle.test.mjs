@@ -101,3 +101,41 @@ test('local override uses the configured local frame and the current browser aud
   assert.equal(calls.at(-1).audience,'http://192.168.1.10:8123');
   card.disconnectedCallback();window.location=previous;
 });
+
+test('an IP fallback is used for both pairing and embedding and never accepts old frame messages',async()=>{
+  const previousFetch=window.fetch;
+  window.fetch=async url=>{if(url.startsWith('https://clm.local'))throw new Error('DNS failure');return {};};
+  const calls=[];
+  const localStatus={...status,workspace_origins:['https://clm.local','https://192.168.1.20:8443'],workspace_origin:'https://clm.local'};
+  const card=setup(async message=>{calls.push(message);return message.operation==='status'?localStatus:{audience:window.location.origin,nonce:message.nonce,view:'workspace',grant:'secret'};});
+  await flush();
+  assert.equal(card._frame.src,'https://192.168.1.20:8443/companions/workspace');
+  await card._ws('pair');
+  assert.equal(calls.at(-1).workspace_origin,'https://192.168.1.20:8443');
+  const frame=card._frame;const nonce='d'.repeat(64);
+  await card._receive({source:frame.contentWindow,origin:'https://clm.local',data:{type:'clm-companion-ready',view:'workspace',nonce}});
+  assert.equal(frame.contentWindow.sent.length,0);
+  await card._receive({source:frame.contentWindow,origin:'https://192.168.1.20:8443',data:{type:'clm-companion-ready',view:'workspace',nonce}});
+  assert.equal(calls.at(-1).workspace_origin,'https://192.168.1.20:8443');
+  assert.equal(frame.contentWindow.sent[0].origin,'https://192.168.1.20:8443');
+  card.disconnectedCallback();window.fetch=previousFetch;
+});
+
+test('frame readiness timeout tries a configured alternative and rejects late original messages',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});
+  const calls=[];
+  const candidates=['https://local.example','https://fallback.example'];
+  const card=setup(async message=>{calls.push(message);return message.operation==='status'?{...status,workspace_origin:candidates[0],workspace_origins:candidates}:{audience:window.location.origin,nonce:message.nonce,view:'workspace',grant:'secret'};});
+  await flush();
+  const original=card._frame;
+  t.mock.timers.tick(10000);
+  assert.equal(original.removed,true);
+  assert.equal(card._frame.src,'https://fallback.example/companions/workspace');
+  const nonce='e'.repeat(64);
+  await card._receive({source:original.contentWindow,origin:candidates[0],data:{type:'clm-companion-ready',view:'workspace',nonce}});
+  assert.equal(calls.filter(value=>value.operation==='view').length,0);
+  const fallback=card._frame;
+  await card._receive({source:fallback.contentWindow,origin:candidates[1],data:{type:'clm-companion-ready',view:'workspace',nonce}});
+  assert.equal(fallback.contentWindow.sent[0].origin,candidates[1]);
+  card.disconnectedCallback();
+});
