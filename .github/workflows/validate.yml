@@ -48,7 +48,7 @@ jobs:
           if state=$(gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null); then
             if [[ "$state" == 'false' ]]; then
               git fetch origin "refs/tags/$tag:refs/tags/$tag"
-              if ! git diff --quiet "$tag" HEAD -- src dist/clm-card.js package.json; then
+              if ! git diff --quiet "$tag" HEAD -- src dist/clm-card.js package.json hacs.json; then
                 echo 'Card code changed after this release. Bump package.json version before publishing.'
                 exit 1
               fi
