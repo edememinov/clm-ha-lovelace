@@ -57,12 +57,12 @@ without a bump fail. A contents-write release job creates a draft, attaches the
 committed validated JavaScript module and then publishes. No shared extension
 packaging is performed. Reruns skip an identical published release.
 
-An authenticated frame may hand off an opaque approved binding to an existing
-native automation. Only an HA administrator can use the native configuration
-endpoint. The shell reads the current definition twice and compares revisions
-before saving, preserves triggers/conditions/actions, rejects blueprint or
-unavailable file definitions and avoids duplicate binding steps. No private
-labels, command inputs or credentials are copied into that configuration.
+From 0.2.0 the shell is only the linking surface and the frame. The workspace
+owns its Items, Approvals and Settings tabs, including the setup guide and the
+Windows worker check that the shell used to render above the frame. The binding
+hand-off into existing HA automations was removed together with
+`bindingMessage`/`appendBinding`: HA automations pick CLM items in the
+integration's Run CLM item action.
 
 - https://developers.home-assistant.io/docs/frontend/custom-ui/custom-card/
 - https://developers.home-assistant.io/docs/frontend/data/

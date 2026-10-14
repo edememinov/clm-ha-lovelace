@@ -54,20 +54,3 @@ export function readyMessage(event, frame, workspaceOrigin) {
     typeof event.data.nonce === 'string' && /^[A-Fa-f0-9-]{32,128}$/.test(event.data.nonce);
 }
 
-export function bindingMessage(event, frame, workspaceOrigin, nonce) {
-  return event.origin === workspaceOrigin && event.source === frame.contentWindow && event.data?.type === 'clm-companion-binding'
-    && event.data.nonce === nonce && /^[a-f0-9-]{36}$/i.test(event.data.binding ?? '')
-    && /^automation\.[a-z0-9_]+$/.test(event.data.automation ?? '');
-}
-
-export function appendBinding(config, entry, binding) {
-  if (!config.id || config.use_blueprint) throw new Error('Choose an existing editable automation.');
-  const result = structuredClone(config);
-  const key = Object.hasOwn(result, 'actions') ? 'actions' : 'action';
-  const actions = result[key] == null ? [] : Array.isArray(result[key]) ? result[key] : [result[key]];
-  if (!actions.some(action => (action.action ?? action.service) === 'clm.invoke' && action.data?.config_entry_id === entry && action.data?.binding === binding)) {
-    actions.push({ alias: 'CLM approved action', action: 'clm.invoke', data: { config_entry_id: entry, binding } });
-  }
-  result[key] = actions;
-  return result;
-}

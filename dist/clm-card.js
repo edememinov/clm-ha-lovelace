@@ -54,23 +54,6 @@ export function readyMessage(event, frame, workspaceOrigin) {
     typeof event.data.nonce === 'string' && /^[A-Fa-f0-9-]{32,128}$/.test(event.data.nonce);
 }
 
-export function bindingMessage(event, frame, workspaceOrigin, nonce) {
-  return event.origin === workspaceOrigin && event.source === frame.contentWindow && event.data?.type === 'clm-companion-binding'
-    && event.data.nonce === nonce && /^[a-f0-9-]{36}$/i.test(event.data.binding ?? '')
-    && /^automation\.[a-z0-9_]+$/.test(event.data.automation ?? '');
-}
-
-export function appendBinding(config, entry, binding) {
-  if (!config.id || config.use_blueprint) throw new Error('Choose an existing editable automation.');
-  const result = structuredClone(config);
-  const key = Object.hasOwn(result, 'actions') ? 'actions' : 'action';
-  const actions = result[key] == null ? [] : Array.isArray(result[key]) ? result[key] : [result[key]];
-  if (!actions.some(action => (action.action ?? action.service) === 'clm.invoke' && action.data?.config_entry_id === entry && action.data?.binding === binding)) {
-    actions.push({ alias: 'CLM approved action', action: 'clm.invoke', data: { config_entry_id: entry, binding } });
-  }
-  result[key] = actions;
-  return result;
-}
 
 
 export class ClmCard extends HTMLElement {
@@ -92,7 +75,6 @@ export class ClmCard extends HTMLElement {
     this._actor = value.user?.id;
     this._connection = value.connection;
     this._hass = value;
-    if (!changed) this._refreshActionsGuide();
     if (changed) {
       this._reset();
       if (this.isConnected && this._config) this._load();
@@ -115,9 +97,6 @@ export class ClmCard extends HTMLElement {
     this._frame = null;
     this._nonce = null;
     this._requesting = false;
-    this._guideBody = null;
-    this._guideSignature = null;
-    this._linked = false;
     this.shadowRoot.replaceChildren();
   }
   _ws(operation, extra = {}) {
@@ -139,84 +118,8 @@ export class ClmCard extends HTMLElement {
     content.setAttribute('aria-live', 'polite');
     content.textContent = text;
     card.append(content);
-    this._addActionsGuide(card);
     this.shadowRoot.replaceChildren(card);
     return content;
-  }
-  _addActionsGuide(card) {
-    const content = document.createElement('div');
-    content.className = 'card-content';
-    const disclosure = document.createElement('details');
-    const summary = document.createElement('summary');
-    summary.textContent = 'HA automation actions and setup';
-    this._guideBody = document.createElement('div');
-    this._guideSignature = null;
-    disclosure.append(summary, this._guideBody);
-    content.append(disclosure);
-    card.append(content);
-    this._refreshActionsGuide();
-  }
-  _refreshActionsGuide() {
-    if (!this._guideBody) return;
-    const actions = [
-      ['start_session', 'Start session and open Selkies', 'device, PIN, exact preset name, incognito'],
-      ['open_selkies', 'Open matching Selkies viewers', 'device, PIN, session name contains, all/latest, incognito'],
-      ['open_clm', 'Open CLM window', 'device, PIN, incognito'],
-      ['list_devices', 'List CLM Windows workers', 'shared device names, IDs, online/offline status and worker version'],
-    ];
-    const availability = actions.map(([id]) => Boolean(this._hass?.services?.clm?.[id]));
-    const signature = JSON.stringify([availability, this._linked, this._origin, this._config?.config_entry_id]);
-    if (signature === this._guideSignature) return;
-    this._guideSignature = signature;
-    const paragraph = text => { const node = document.createElement('p'); node.textContent = text; return node; };
-    const list = document.createElement('ul');
-    actions.forEach(([id, label, inputs], index) => {
-      const row = document.createElement('li');
-      row.textContent = `${label} (clm.${id}): ${availability[index] ? 'Registered in HA' : 'Not registered — update the CLM integration and restart HA'}. ${inputs}.`;
-      list.append(row);
-    });
-    const guide = document.createElement('a');
-    guide.href = 'https://github.com/edememinov/clm-ha-component/blob/main/docs/native-actions.md';
-    guide.target = '_blank'; guide.rel = 'noopener noreferrer';
-    guide.textContent = 'Step-by-step setup in the HA automation builder';
-    const nodes = [
-      paragraph('HA owns the trigger. In your HA automation, choose Then do > Add action and search CLM. These are actions, not MQTT entities. The card can stay outside Personal Mode.'),
-      paragraph(this._linked ? 'Your account is linked. Actions use its CLM permissions; each launch supplies the current PIN.' : 'Link your own CLM account above before running actions.'),
-      list,
-      paragraph('In the action editor, select your CLM connection, enter the device name and PIN, enter the preset or session name, and set the Incognito window toggle. Save the automation. No YAML editing is required.'),
-      paragraph('Install the Windows worker separately: import its UI package into CLM, open Plugin tools > Window visibility > Windows setup, download setup and run it as the Windows user who opens the browser. HACS does not install files on the PC. The Windows user must be logged in.'),
-      paragraph('Choose the same name shown in CLM Devices. Run List CLM Windows workers in HA to check online/offline status; registration above does not confirm worker connectivity. Hide/show enable switches do not control these launch actions.'),
-      paragraph('Start session takes the exact preset name and opens Selkies directly. Open matching Selkies viewers uses existing sessions: latest chooses the newest match, all opens every match. Incognito false opens normal windows; true opens private windows. Supply the PIN in the HA action; it is never sent to Windows. HA traces can contain it.'),
-      guide,
-    ];
-    const workers = document.createElement('div');
-    const outcome = paragraph(this._linked ? 'Check your workers to see which PCs are online.' : 'Link your account before checking workers.');
-    outcome.setAttribute('role', 'status'); outcome.setAttribute('aria-live', 'polite');
-    const generation = this._generation;
-    this._button(workers, 'Check Windows workers', async () => {
-      outcome.textContent = 'Checking Windows workers…';
-      try {
-        const result = await this._hass.callWS({type:'call_service',domain:'clm',service:'list_devices',
-          service_data:{config_entry_id:this._config.config_entry_id},return_response:true});
-        if (generation !== this._generation || !this.isConnected) return;
-        const rows = result?.response?.devices;
-        if (!Array.isArray(rows)) throw new Error();
-        outcome.textContent = rows.length ? rows.map(row => `${row.name}: ${row.online ? 'online' : 'offline'} (worker ${row.version || 'unknown version'})`).join('; ')
-          : 'No Windows workers have reported yet. Download and run Windows setup on the PC.';
-      } catch {
-        if (generation === this._generation) outcome.textContent = 'Could not check workers. Verify your account link, CLM permissions and updated backend.';
-      }
-    });
-    workers.children[0].disabled = !this._linked || !availability[3];
-    workers.append(outcome); nodes.splice(3,0,workers);
-    if (this._origin) {
-      const setup = document.createElement('a');
-      setup.href = `${this._origin}/tools/plugins/window-visibility/settings`;
-      setup.target = '_blank'; setup.rel = 'noopener noreferrer';
-      setup.textContent = 'Open Windows worker setup in CLM';
-      const wrapper = document.createElement('p'); wrapper.append(setup); nodes.push(wrapper);
-    }
-    this._guideBody.replaceChildren(...nodes);
   }
   _button(container, text, action) {
     const button = document.createElement('ha-button');
@@ -237,7 +140,6 @@ export class ClmCard extends HTMLElement {
       const status = await this._ws('status');
       if (generation !== this._generation || !this.isConnected) return;
       if (status.version !== 1) throw new Error('Unsupported version.');
-      this._linked = Boolean(status.linked);
       this._candidates = workspaceCandidates(status, window.location.origin);
       this._canSelectWorkspace = Array.isArray(status.workspace_origins);
       const selected = await reachableWorkspace(this._candidates, window.fetch?.bind(window));
@@ -292,8 +194,8 @@ export class ClmCard extends HTMLElement {
     frame.style.height = `${this._config.height}px`;
     frame.style.border = '0';
     this._frame = frame;
+    // The workspace owns its Items, Approvals and Settings tabs; this shell only frames it.
     const surface = document.createElement('ha-card');
-    this._addActionsGuide(surface);
     surface.append(frame);
     this.shadowRoot.replaceChildren(surface);
     const remaining = this._candidates.filter(value => value !== this._origin);
@@ -310,10 +212,6 @@ export class ClmCard extends HTMLElement {
   }
   async _receive(event) {
     const frame = this._frame;
-    if (frame && this._nonce && bindingMessage(event, frame, this._origin, this._nonce)) {
-      await this._attachBinding(event, frame);
-      return;
-    }
     if (!frame || !readyMessage(event, frame, this._origin) || this._requesting || this._nonce === event.data.nonce) return;
     clearTimeout(this._readyTimeout);
     const generation = this._generation;
@@ -329,29 +227,6 @@ export class ClmCard extends HTMLElement {
       if (generation === this._generation) this._surface('CLM account authorization is unavailable.');
     } finally {
       if (generation === this._generation && frame === this._frame) this._requesting = false;
-    }
-  }
-  async _attachBinding(event, frame) {
-    if(this._editing) return;
-    this._editing = true;
-    const generation = this._generation;
-    let ok = false;
-    try {
-      // Use the same admin-gated configuration APIs as HA's existing editor.
-      // No new automation is created and no definition is persisted in CLM.
-      const live = await this._hass.callWS({type:'automation/config',entity_id:event.data.automation});
-      if(!live.config?.id || live.config.use_blueprint) throw new Error();
-      const path = `config/automation/config/${encodeURIComponent(live.config.id)}`;
-      const current = await this._hass.callApi('GET', path);
-      const updated = appendBinding(current, this._config.config_entry_id, event.data.binding);
-      const latest = await this._hass.callApi('GET', path);
-      if(generation !== this._generation || frame !== this._frame || JSON.stringify(current) !== JSON.stringify(latest)) throw new Error();
-      await this._hass.callApi('POST', path, updated);
-      ok = true;
-    } catch { /* Only a neutral outcome returns to the embedded view. */ }
-    finally {
-      this._editing = false;
-      if(generation === this._generation && frame === this._frame) frame.contentWindow.postMessage({type:'clm-companion-binding-result',nonce:this._nonce,ok},this._origin);
     }
   }
 }

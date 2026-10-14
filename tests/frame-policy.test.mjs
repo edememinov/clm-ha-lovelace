@@ -1,29 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { configuration, origin, readyMessage, appendBinding, bindingMessage, workspaceCandidates, reachableWorkspace } from '../src/frame-policy.js';
+import { configuration, origin, readyMessage, workspaceCandidates, reachableWorkspace } from '../src/frame-policy.js';
 
 test('configuration retains presentation and connection reference only', () => {
   assert.deepEqual(configuration({type:'custom:clm-card', config_entry_id:'connection', pin:'1234', credential:'secret', height:400}),
     {type:'custom:clm-card', config_entry_id:'connection', height:400});
   for (const height of [0, 319, 1601, 640.5]) assert.throws(() => configuration({type:'custom:clm-card', config_entry_id:'connection', height}));
-});
-test('binding handoff requires exact frame authority and opaque references',()=>{
-  const frame={contentWindow:{}};
-  const event={source:frame.contentWindow,origin:'https://workspace.example',data:{type:'clm-companion-binding',nonce:'nonce',binding:'a'.repeat(36),automation:'automation.sample'}};
-  assert.equal(bindingMessage(event,frame,event.origin,'nonce'),true);
-  assert.equal(bindingMessage({...event,source:{}},frame,event.origin,'nonce'),false);
-  assert.equal(bindingMessage(event,frame,event.origin,'stale'),false);
-});
-test('existing automation keeps conditions, triggers and steps and does not duplicate the binding',()=>{
-  const config={id:'existing',conditions:[{condition:'state',entity_id:'sensor.sample',state:'ready'}],triggers:[],actions:[{action:'light.turn_on'}],mode:'single'};
-  const updated=appendBinding(config,'connection','binding');
-  assert.deepEqual(updated.conditions,config.conditions);
-  assert.deepEqual(updated.triggers,config.triggers);
-  assert.equal(updated.actions.length,2);
-  assert.equal(config.actions.length,1);
-  assert.deepEqual(appendBinding(updated,'connection','binding'),updated);
-  assert.throws(()=>appendBinding({id:'existing',use_blueprint:{path:'sample'}} ,'connection','binding'));
-  assert.throws(()=>appendBinding({actions:[]},'connection','binding'));
 });
 test('workspace origin cannot carry credentials, paths or weaker transport', () => {
   assert.equal(origin('https://workspace.example/'), 'https://workspace.example');
